@@ -1,173 +1,193 @@
 package id.reang.camera
 
-import android.Manifest
-import android.content.pm.PackageManager
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
-import android.view.View
+import android.provider.Settings
+import android.widget.ArrayAdapter
 import android.widget.Button
-import android.widget.FrameLayout
+import android.widget.Spinner
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.appcompat.widget.SwitchCompat
-import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
 class SettingsActivity : ComponentActivity() {
-    private lateinit var previewSwitch: SwitchCompat
-    private lateinit var previewContainer: FrameLayout
-    private lateinit var previewView: PreviewView
-    private lateinit var previewStatusText: TextView
+    private lateinit var overlaySwitch: SwitchCompat
+    private lateinit var stabilizationSwitch: SwitchCompat
     private lateinit var cameraChoiceText: TextView
-    private var cameraProvider: ProcessCameraProvider? = null
+    private lateinit var qualitySpinner: Spinner
+    private var updatingSwitch = false
 
     companion object {
-        private const val REQUEST_CAMERA_PERMISSION = 201
         private const val CAMERA_PREFS = "camera_settings"
-        private const val PREF_PREVIEW_ENABLED = "preview_enabled"
+        private const val PREF_FLOATING_ENABLED = "floating_enabled"
         private const val PREF_LENS_FACING = "lens_facing"
-        private const val RECORDING_PREFS = "recording_state"
-        private const val PREF_IS_RECORDING = "is_recording"
+        private const val PREF_QUALITY = "video_quality"
+        private const val PREF_STABILIZATION = "video_stabilization"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
-        previewSwitch = findViewById(R.id.previewSwitch)
-        previewContainer = findViewById(R.id.previewContainer)
-        previewView = findViewById(R.id.settingsPreviewView)
-        previewStatusText = findViewById(R.id.previewStatusText)
+        overlaySwitch = findViewById(R.id.floatingSwitch)
+        stabilizationSwitch = findViewById(R.id.stabilizationSwitch)
         cameraChoiceText = findViewById(R.id.cameraChoiceText)
+        qualitySpinner = findViewById(R.id.qualitySpinner)
 
         findViewById<Button>(R.id.backButton).setOnClickListener { finish() }
+        findViewById<Button>(R.id.overlayPermissionButton).setOnClickListener {
+            openOverlayPermissionSettings()
+        }
         findViewById<Button>(R.id.switchCameraButton).setOnClickListener {
-            if (isRecording()) {
-                previewStatusText.text = "Hentikan rekaman sebelum mengganti kamera."
-                previewStatusText.visibility = View.VISIBLE
-                return@setOnClickListener
-            }
-            val prefs = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
-            val current = prefs.getInt(PREF_LENS_FACING, CameraSelector.LENS_FACING_BACK)
-            val next = if (current == CameraSelector.LENS_FACING_BACK) {
-                CameraSelector.LENS_FACING_FRONT
-            } else {
-                CameraSelector.LENS_FACING_BACK
-            }
-            prefs.edit().putInt(PREF_LENS_FACING, next).apply()
-            updateCameraChoice()
-            if (previewSwitch.isChecked) startSmallPreview()
+            switchCamera()
         }
 
+        val qualities = listOf("480p", "720p", "1080p", "4K")
+        qualitySpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            qualities
+        )
         val prefs = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
-        previewSwitch.isChecked = prefs.getBoolean(PREF_PREVIEW_ENABLED, false)
-        previewSwitch.setOnCheckedChangeListener { _, enabled ->
-            prefs.edit().putBoolean(PREF_PREVIEW_ENABLED, enabled).apply()
-            previewContainer.visibility = if (enabled) View.VISIBLE else View.GONE
-            if (enabled) {
-                startSmallPreview()
-            } else if (!isRecording()) {
-                cameraProvider?.unbindAll()
+        val selectedQuality = when (prefs.getString(PREF_QUALITY, "FHD")) {
+            "SD" -> 0
+            "HD" -> 1
+            "UHD" -> 3
+            else -> 2
+        }
+        qualitySpinner.setSelection(selectedQuality)
+        qualitySpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: android.widget.AdapterView<*>?,
+                view: android.view.View?,
+                position: Int,
+                id: Long
+            ) {
+                val value = when (position) {
+                    0 -> "SD"
+                    1 -> "HD"
+                    3 -> "UHD"
+                    else -> "FHD"
+                }
+                prefs.edit().putString(PREF_QUALITY, value).apply()
+                refreshFloatingService()
             }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
         }
 
+        stabilizationSwitch.isChecked = prefs.getBoolean(PREF_STABILIZATION, true)
+        stabilizationSwitch.setOnCheckedChangeListener { _, enabled ->
+            prefs.edit().putBoolean(PREF_STABILIZATION, enabled).apply()
+        }
+
+        overlaySwitch.isChecked = prefs.getBoolean(PREF_FLOATING_ENABLED, false)
+        overlaySwitch.setOnCheckedChangeListener { _, enabled ->
+            if (updatingSwitch) return@setOnCheckedChangeListener
+            if (enabled) {
+                if (Settings.canDrawOverlays(this)) {
+                    enableFloatingControls()
+                } else {
+                    openOverlayPermissionSettings()
+                }
+            } else {
+                prefs.edit().putBoolean(PREF_FLOATING_ENABLED, false).apply()
+                val intent = Intent(this, RecordingService::class.java)
+                    .setAction(RecordingService.ACTION_DISABLE_FLOATING)
+                startService(intent)
+            }
+        }
         updateCameraChoice()
-        previewContainer.visibility =
-            if (previewSwitch.isChecked) View.VISIBLE else View.GONE
     }
 
     override fun onResume() {
         super.onResume()
-        if (previewSwitch.isChecked) startSmallPreview()
-    }
-
-    override fun onStop() {
-        if (!isRecording()) {
-            try {
-                cameraProvider?.unbindAll()
-            } catch (_: Exception) {
-            }
+        val granted = Settings.canDrawOverlays(this)
+        findViewById<Button>(R.id.overlayPermissionButton).text =
+            if (granted) "IZIN OVERLAY SUDAH AKTIF" else "BERI IZIN TAMPIL DI ATAS APLIKASI"
+        if (overlaySwitch.isChecked && granted) {
+            enableFloatingControls()
+        } else if (overlaySwitch.isChecked && !granted) {
+            updatingSwitch = true
+            overlaySwitch.isChecked = false
+            updatingSwitch = false
         }
-        super.onStop()
+        updateCameraChoice()
     }
 
-    private fun isRecording(): Boolean = getSharedPreferences(RECORDING_PREFS, MODE_PRIVATE)
-        .getBoolean(PREF_IS_RECORDING, false)
+    private fun openOverlayPermissionSettings() {
+        if (Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Izin overlay sudah aktif", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+        @Suppress("DEPRECATION")
+        startActivityForResult(intent, 301)
+    }
+
+    @Deprecated("Use Activity Result API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 301 && Settings.canDrawOverlays(this)) {
+            enableFloatingControls()
+        }
+    }
+
+    private fun enableFloatingControls() {
+        if (!Settings.canDrawOverlays(this)) return
+        getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE).edit()
+            .putBoolean(PREF_FLOATING_ENABLED, true)
+            .apply()
+        updatingSwitch = true
+        overlaySwitch.isChecked = true
+        updatingSwitch = false
+        val intent = Intent(this, RecordingService::class.java)
+            .setAction(RecordingService.ACTION_ENABLE_FLOATING)
+        ContextCompat.startForegroundService(this, intent)
+    }
+
+    private fun refreshFloatingService() {
+        if (!Settings.canDrawOverlays(this)) return
+        val enabled = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
+            .getBoolean(PREF_FLOATING_ENABLED, false)
+        if (enabled) {
+            val intent = Intent(this, RecordingService::class.java)
+                .setAction(RecordingService.ACTION_ENABLE_FLOATING)
+            ContextCompat.startForegroundService(this, intent)
+        }
+    }
+
+    private fun switchCamera() {
+        val prefs = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
+        val current = prefs.getInt(PREF_LENS_FACING, CameraSelector.LENS_FACING_BACK)
+        val next = if (current == CameraSelector.LENS_FACING_BACK) {
+            CameraSelector.LENS_FACING_FRONT
+        } else {
+            CameraSelector.LENS_FACING_BACK
+        }
+        prefs.edit().putInt(PREF_LENS_FACING, next).apply()
+        updateCameraChoice()
+        val enabled = prefs.getBoolean(PREF_FLOATING_ENABLED, false)
+        if (enabled) {
+            val intent = Intent(this, RecordingService::class.java)
+                .setAction(RecordingService.ACTION_REFRESH_CAMERA)
+            startService(intent)
+        }
+    }
 
     private fun updateCameraChoice() {
         val facing = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
             .getInt(PREF_LENS_FACING, CameraSelector.LENS_FACING_BACK)
         cameraChoiceText.text = if (facing == CameraSelector.LENS_FACING_BACK) {
-            "Kamera belakang"
+            "Kamera aktif: BELAKANG"
         } else {
-            "Kamera depan"
-        }
-    }
-
-    private fun startSmallPreview() {
-        previewContainer.visibility = View.VISIBLE
-        if (isRecording()) {
-            previewView.visibility = View.INVISIBLE
-            previewStatusText.visibility = View.VISIBLE
-            previewStatusText.text = "Preview tidak tersedia selama kamera sedang merekam."
-            return
-        }
-
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.CAMERA),
-                REQUEST_CAMERA_PERMISSION
-            )
-            previewStatusText.text = "Izin kamera diperlukan untuk menampilkan preview."
-            return
-        }
-
-        previewStatusText.visibility = View.GONE
-        previewView.visibility = View.VISIBLE
-        val future = ProcessCameraProvider.getInstance(this)
-        future.addListener({
-            if (isFinishing || isRecording() || !previewSwitch.isChecked) return@addListener
-            try {
-                cameraProvider = future.get()
-                cameraProvider?.unbindAll()
-                val builder = Preview.Builder()
-                Camera2Interop.Extender(builder).setCaptureRequestOption(
-                    android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE,
-                    android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
-                )
-                val preview = builder.build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
-                val facing = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
-                    .getInt(PREF_LENS_FACING, CameraSelector.LENS_FACING_BACK)
-                val selector = CameraSelector.Builder().requireLensFacing(facing).build()
-                cameraProvider?.bindToLifecycle(this, selector, preview)
-            } catch (e: Exception) {
-                previewStatusText.visibility = View.VISIBLE
-                previewStatusText.text =
-                    "Preview gagal dibuka: " + (e.localizedMessage ?: "kesalahan kamera")
-            }
-        }, ContextCompat.getMainExecutor(this))
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_CAMERA_PERMISSION &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
-            PackageManager.PERMISSION_GRANTED && previewSwitch.isChecked
-        ) {
-            startSmallPreview()
+            "Kamera aktif: DEPAN"
         }
     }
 }

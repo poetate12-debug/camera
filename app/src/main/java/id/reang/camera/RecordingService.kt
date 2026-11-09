@@ -8,17 +8,32 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.graphics.PixelFormat
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureRequest
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.Settings
+import android.view.Gravity
+import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import android.widget.Button
+import android.widget.TextView
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
 import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
+import androidx.camera.view.PreviewView
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
@@ -31,6 +46,10 @@ class RecordingService : LifecycleService() {
         const val ACTION_START_RECORDING = "id.reang.camera.START_RECORDING"
         const val ACTION_STOP_RECORDING = "id.reang.camera.STOP_RECORDING"
         const val ACTION_STATE_CHANGED = "id.reang.camera.RECORDING_STATE_CHANGED"
+        const val ACTION_ENABLE_FLOATING = "id.reang.camera.ENABLE_FLOATING"
+        const val ACTION_DISABLE_FLOATING = "id.reang.camera.DISABLE_FLOATING"
+        const val ACTION_SWITCH_CAMERA = "id.reang.camera.SWITCH_CAMERA"
+        const val ACTION_REFRESH_CAMERA = "id.reang.camera.REFRESH_CAMERA"
 
         const val EXTRA_LENS_FACING = "lens_facing"
         const val EXTRA_IS_RECORDING = "is_recording"
@@ -40,12 +59,30 @@ class RecordingService : LifecycleService() {
         private const val PREF_IS_RECORDING = "is_recording"
         private const val PREF_STATUS = "status_text"
         private const val PREF_STARTED_AT = "recording_started_at"
+        private const val CAMERA_PREFS = "camera_settings"
+        private const val PREF_LENS_FACING = "lens_facing"
+        private const val PREF_QUALITY = "video_quality"
+        private const val PREF_STABILIZATION = "video_stabilization"
     }
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var activeRecording: androidx.camera.video.Recording? = null
+    private var activePreview: Preview? = null
     private var startInProgress = false
     private var stopRequested = false
+    private var overlayEnabled = false
+    private var disableOverlayAfterFinalize = false
+
+    private var windowManager: WindowManager? = null
+    private var overlayView: View? = null
+    private var overlayPreview: PreviewView? = null
+    private var overlayStatus: TextView? = null
+    private var overlayCameraLabel: TextView? = null
+    private var overlayQualityLabel: TextView? = null
+    private var overlayRecButton: Button? = null
+    private var overlayStopButton: Button? = null
+    private var overlaySwitchButton: Button? = null
+    private var overlayLayoutParams: WindowManager.LayoutParams? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -56,87 +93,175 @@ class RecordingService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
 
         when (intent?.action) {
+            ACTION_ENABLE_FLOATING -> enableFloatingControls()
+            ACTION_DISABLE_FLOATING -> {
+                if (activeRecording != null || startInProgress) {
+                    disableOverlayAfterFinalize = true
+                    setOverlayStatus("Hentikan rekaman sebelum menutup panel")
+                } else {
+                    disableFloatingControls()
+                }
+            }
+            ACTION_SWITCH_CAMERA -> switchCameraFromOverlay()
+            ACTION_REFRESH_CAMERA -> {
+                updateOverlayUi(activeRecording != null || startInProgress, "Pengaturan kamera diperbarui")
+                bindPreviewOnly()
+            }
             ACTION_STOP_RECORDING -> {
                 stopRequested = true
                 val currentRecording = activeRecording
                 if (currentRecording != null) {
                     currentRecording.stop()
-                } else if (!startInProgress) {
+                } else if (!startInProgress && !overlayEnabled) {
                     finishService("Rekaman dihentikan")
                 }
             }
-
-            ACTION_START_RECORDING, null -> {
+            ACTION_START_RECORDING -> {
                 if (startInProgress || activeRecording != null) return START_NOT_STICKY
-
                 stopRequested = false
                 startInProgress = true
-                startForegroundCompat()
+                startForegroundCompat("Menyiapkan kamera untuk merekam")
                 publishState(true, "Menyiapkan kamera untuk merekam...")
-
                 val lensFacing = intent?.getIntExtra(
                     EXTRA_LENS_FACING,
-                    CameraSelector.LENS_FACING_BACK
-                ) ?: CameraSelector.LENS_FACING_BACK
+                    selectedLensFacing()
+                ) ?: selectedLensFacing()
                 prepareCameraAndStartRecording(lensFacing)
             }
         }
-
         return START_NOT_STICKY
     }
 
-    private fun startForegroundCompat() {
-        val notification = buildNotification()
+    private fun enableFloatingControls() {
+        if (!Settings.canDrawOverlays(this)) {
+            stopSelf()
+            return
+        }
+        overlayEnabled = true
+        disableOverlayAfterFinalize = false
+        startForegroundCompat("Kontrol kamera mengambang aktif • preview kamera")
+        addFloatingOverlay()
+        bindPreviewOnly()
+        publishState(false, "Preview aktif • belum merekam")
+    }
+
+    private fun disableFloatingControls() {
+        overlayEnabled = false
+        removeFloatingOverlay()
+        try {
+            cameraProvider?.unbindAll()
+        } catch (_: Exception) {
+        }
+        cameraProvider = null
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun startForegroundCompat(message: String, includeMicrophone: Boolean = true) {
+        val notification = buildNotification(message)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val serviceTypes =
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            val serviceTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                (if (includeMicrophone) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
             startForeground(NOTIFICATION_ID, notification, serviceTypes)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
     }
 
+    private fun selectedLensFacing(): Int =
+        getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
+            .getInt(PREF_LENS_FACING, CameraSelector.LENS_FACING_BACK)
+
+    private fun selectedQuality(): Quality =
+        when (getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE).getString(PREF_QUALITY, "FHD")) {
+            "UHD" -> Quality.UHD
+            "HD" -> Quality.HD
+            "SD" -> Quality.SD
+            else -> Quality.FHD
+        }
+
+    private fun isStabilizationEnabled(): Boolean =
+        getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
+            .getBoolean(PREF_STABILIZATION, true)
+
+    private fun cameraName(facing: Int = selectedLensFacing()): String =
+        if (facing == CameraSelector.LENS_FACING_FRONT) "KAMERA DEPAN" else "KAMERA BELAKANG"
+
+    private fun qualityName(): String =
+        when (getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE).getString(PREF_QUALITY, "FHD")) {
+            "UHD" -> "4K"
+            "HD" -> "720p"
+            "SD" -> "480p"
+            else -> "1080p"
+        }
+
     private fun prepareCameraAndStartRecording(lensFacing: Int) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) !=
             PackageManager.PERMISSION_GRANTED
         ) {
-            finishService("Izin kamera belum diberikan")
+            recoverAfterRecording("Izin kamera belum diberikan")
             return
         }
 
         val providerFuture = ProcessCameraProvider.getInstance(applicationContext)
         providerFuture.addListener({
             if (stopRequested) {
-                finishService("Rekaman dihentikan")
+                recoverAfterRecording("Rekaman dibatalkan")
                 return@addListener
             }
 
             try {
                 cameraProvider = providerFuture.get()
+                val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
                 cameraProvider?.unbindAll()
 
+                val requestedQuality = selectedQuality()
                 val recorder = Recorder.Builder()
-                    .setQualitySelector(QualitySelector.from(Quality.FHD))
+                    .setQualitySelector(
+                        QualitySelector.from(
+                            requestedQuality,
+                            FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
+                        )
+                    )
                     .build()
 
                 val videoBuilder = VideoCapture.Builder(recorder)
                 Camera2Interop.Extender(videoBuilder).setCaptureRequestOption(
-                    android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE,
-                    android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
                 )
+
+                var stabilizationApplied = false
+                if (isStabilizationEnabled()) {
+                    val modes = Camera2CameraInfo.from(
+                        cameraProvider!!.getCameraInfo(selector)
+                    ).getCameraCharacteristic(
+                        CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES
+                    )
+                    if (modes?.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON) == true) {
+                        Camera2Interop.Extender(videoBuilder).setCaptureRequestOption(
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                        )
+                        stabilizationApplied = true
+                    }
+                }
+
                 val videoCapture = videoBuilder.build()
-
-                val selector = CameraSelector.Builder()
-                    .requireLensFacing(lensFacing)
-                    .build()
-
-                cameraProvider?.bindToLifecycle(this, selector, videoCapture)
+                val previewUseCase = if (overlayEnabled) buildOverlayPreview() else null
+                if (previewUseCase != null) {
+                    cameraProvider?.bindToLifecycle(this, selector, previewUseCase, videoCapture)
+                    activePreview = previewUseCase
+                } else {
+                    cameraProvider?.bindToLifecycle(this, selector, videoCapture)
+                    activePreview = null
+                }
 
                 val values = android.content.ContentValues().apply {
                     put(
                         MediaStore.Video.Media.DISPLAY_NAME,
-                        "REC_" + System.currentTimeMillis() + ".mp4"
+                        "REC_" + System.currentTimeMillis() + "_" +
+                            (if (lensFacing == CameraSelector.LENS_FACING_FRONT) "FRONT" else "BACK") + ".mp4"
                     )
                     put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
                     put(
@@ -166,11 +291,13 @@ class RecordingService : LifecycleService() {
                             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
                                 .putLong(PREF_STARTED_AT, System.currentTimeMillis())
                                 .apply()
+                            val stabilText = if (stabilizationApplied) " • Stabilizer ON" else ""
                             publishState(
                                 true,
-                                "● MEREKAM • Tetap berjalan saat aplikasi di Home"
+                                "● REC AKTIF • ${cameraName(lensFacing)} • ${qualityName()}$stabilText"
                             )
-                            updateNotification("Perekaman video sedang berlangsung")
+                            updateNotification("REC aktif • ${cameraName(lensFacing)}")
+                            updateOverlayUi(true, "REC AKTIF")
                             if (stopRequested) activeRecording?.stop()
                         }
 
@@ -178,24 +305,82 @@ class RecordingService : LifecycleService() {
                             val hasError = event.hasError()
                             activeRecording = null
                             startInProgress = false
+                            stopRequested = false
                             val message = if (hasError) {
-                                "Rekaman gagal atau terhenti (kode " + event.error + ")"
+                                "Rekaman gagal/terhenti (kode ${event.error})"
                             } else {
-                                "Video berhasil disimpan • Movies/BackgroundCameraRecorder"
+                                "Video tersimpan • Movies/BackgroundCameraRecorder"
                             }
-                            finishService(message)
+                            recoverAfterRecording(message)
                         }
                     }
                 }
-
+                updateOverlayUi(true, "MENYIAPKAN REKAMAN")
                 if (stopRequested) activeRecording?.stop()
             } catch (e: Exception) {
-                finishService(
+                recoverAfterRecording(
                     "Gagal memulai kamera: " +
                         (e.localizedMessage ?: e.javaClass.simpleName)
                 )
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun buildOverlayPreview(): Preview? {
+        val previewView = overlayPreview ?: return null
+        if (!overlayEnabled) return null
+        val builder = Preview.Builder()
+        Camera2Interop.Extender(builder).setCaptureRequestOption(
+            CaptureRequest.CONTROL_AF_MODE,
+            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+        )
+        return builder.build().also {
+            it.setSurfaceProvider(previewView.surfaceProvider)
+        }
+    }
+
+    private fun bindPreviewOnly() {
+        if (!overlayEnabled || activeRecording != null || startInProgress) return
+        val previewView = overlayPreview ?: return
+        val future = ProcessCameraProvider.getInstance(applicationContext)
+        future.addListener({
+            if (!overlayEnabled || activeRecording != null || overlayPreview !== previewView) return@addListener
+            try {
+                cameraProvider = future.get()
+                cameraProvider?.unbindAll()
+                val selector = CameraSelector.Builder()
+                    .requireLensFacing(selectedLensFacing())
+                    .build()
+                val preview = buildOverlayPreview() ?: return@addListener
+                cameraProvider?.bindToLifecycle(this, selector, preview)
+                activePreview = preview
+                updateOverlayUi(false, "PREVIEW AKTIF • BELUM MEREKAM")
+                updateNotification("Preview kamera aktif • belum merekam")
+            } catch (e: Exception) {
+                setOverlayStatus(
+                    "Preview gagal: " + (e.localizedMessage ?: "kamera tidak tersedia")
+                )
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun recoverAfterRecording(message: String) {
+        startInProgress = false
+        stopRequested = false
+        publishState(false, message)
+        if (overlayEnabled && !disableOverlayAfterFinalize) {
+            startForegroundCompat("Kontrol mengambang aktif • belum merekam")
+            updateOverlayUi(false, message)
+            bindPreviewOnly()
+            updateNotification("Kontrol mengambang aktif • belum merekam")
+        } else {
+            if (disableOverlayAfterFinalize) {
+                disableOverlayAfterFinalize = false
+                disableFloatingControls()
+            } else {
+                finishService(message)
+            }
+        }
     }
 
     private fun finishService(message: String) {
@@ -225,40 +410,173 @@ class RecordingService : LifecycleService() {
         sendBroadcast(update)
     }
 
+    private fun addFloatingOverlay() {
+        if (overlayView != null || !Settings.canDrawOverlays(this)) return
+        try {
+            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            val view = LayoutInflater.from(this).inflate(R.layout.floating_camera_overlay, null)
+            overlayView = view
+            overlayPreview = view.findViewById(R.id.floatingPreviewView)
+            overlayStatus = view.findViewById(R.id.floatingStatusText)
+            overlayCameraLabel = view.findViewById(R.id.floatingCameraLabel)
+            overlayQualityLabel = view.findViewById(R.id.floatingQualityLabel)
+            overlayRecButton = view.findViewById(R.id.floatingRecButton)
+            overlayStopButton = view.findViewById(R.id.floatingStopButton)
+            overlaySwitchButton = view.findViewById(R.id.floatingSwitchButton)
+
+            overlayRecButton?.setOnClickListener {
+                if (activeRecording == null && !startInProgress) {
+                    stopRequested = false
+                    startInProgress = true
+                    startForegroundCompat("Menyiapkan kamera dari kontrol mengambang")
+                    publishState(true, "Menyiapkan kamera untuk merekam...")
+                    prepareCameraAndStartRecording(selectedLensFacing())
+                }
+            }
+            overlayStopButton?.setOnClickListener {
+                stopRequested = true
+                activeRecording?.stop()
+            }
+            overlaySwitchButton?.setOnClickListener {
+                switchCameraFromOverlay()
+            }
+            view.findViewById<View>(R.id.floatingHeader).setOnTouchListener { _, event ->
+                val params = overlayLayoutParams ?: return@setOnTouchListener false
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        initialX = params.x
+                        initialY = params.y
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        params.x = initialX + (event.rawX - initialTouchX).toInt()
+                        params.y = initialY + (event.rawY - initialTouchY).toInt()
+                        try {
+                            windowManager?.updateViewLayout(view, params)
+                        } catch (_: Exception) {
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+
+            val params = WindowManager.LayoutParams(
+                dp(270),
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = dp(12)
+                y = dp(110)
+            }
+            overlayLayoutParams = params
+            windowManager?.addView(view, params)
+            updateOverlayUi(false, "MEMUAT PREVIEW")
+        } catch (e: Exception) {
+            removeFloatingOverlay()
+            publishState(false, "Panel mengambang gagal dibuka: " + (e.localizedMessage ?: "error"))
+        }
+    }
+
+    private var initialX = 0
+    private var initialY = 0
+    private var initialTouchX = 0f
+    private var initialTouchY = 0f
+
+    private fun removeFloatingOverlay() {
+        val view = overlayView
+        if (view != null) {
+            try {
+                windowManager?.removeView(view)
+            } catch (_: Exception) {
+            }
+        }
+        overlayView = null
+        overlayPreview = null
+        overlayStatus = null
+        overlayCameraLabel = null
+        overlayQualityLabel = null
+        overlayRecButton = null
+        overlayStopButton = null
+        overlaySwitchButton = null
+        overlayLayoutParams = null
+    }
+
+    private fun switchCameraFromOverlay() {
+        if (activeRecording != null || startInProgress) {
+            setOverlayStatus("STOP rekaman sebelum mengganti kamera")
+            return
+        }
+        val next = if (selectedLensFacing() == CameraSelector.LENS_FACING_BACK) {
+            CameraSelector.LENS_FACING_FRONT
+        } else {
+            CameraSelector.LENS_FACING_BACK
+        }
+        getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE).edit()
+            .putInt(PREF_LENS_FACING, next)
+            .apply()
+        updateOverlayUi(false, "Mengganti ke ${cameraName(next)}")
+        bindPreviewOnly()
+    }
+
+    private fun updateOverlayUi(recording: Boolean, status: String) {
+        overlayStatus?.text = status
+        overlayCameraLabel?.text = cameraName()
+        overlayQualityLabel?.text = "Kualitas ${qualityName()}"
+        overlayRecButton?.isEnabled = !recording && !startInProgress
+        overlayStopButton?.isEnabled = recording || startInProgress
+        overlaySwitchButton?.isEnabled = !recording && !startInProgress
+        overlayRecButton?.alpha = if (!recording && !startInProgress) 1f else 0.55f
+        overlayStopButton?.alpha = if (recording || startInProgress) 1f else 0.55f
+        overlaySwitchButton?.alpha = if (!recording && !startInProgress) 1f else 0.55f
+    }
+
+    private fun setOverlayStatus(message: String) {
+        overlayStatus?.text = message
+    }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
+
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Perekaman kamera",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Status perekaman kamera yang sedang berjalan"
+            description = "Status preview dan perekaman kamera yang sedang berlangsung"
             setShowBadge(false)
         }
         getSystemService(NotificationManager::class.java)
             .createNotificationChannel(channel)
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(message: String): Notification {
         val openAppIntent = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
+        val panelIdle = overlayEnabled && activeRecording == null && !startInProgress
         val stopServiceIntent = Intent(this, RecordingService::class.java)
-            .setAction(ACTION_STOP_RECORDING)
+            .setAction(if (panelIdle) ACTION_DISABLE_FLOATING else ACTION_STOP_RECORDING)
         val stopPendingIntent = PendingIntent.getService(
             this,
             1,
             stopServiceIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.presence_video_online)
             .setContentTitle("Background Camera Recorder")
-            .setContentText("Kamera sedang merekam")
+            .setContentText(message)
             .setContentIntent(openAppIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -266,7 +584,7 @@ class RecordingService : LifecycleService() {
             .addAction(
                 NotificationCompat.Action(
                     android.R.drawable.ic_media_pause,
-                    "HENTIKAN",
+                    if (panelIdle) "MATIKAN PANEL" else "HENTIKAN",
                     stopPendingIntent
                 )
             )
@@ -274,28 +592,16 @@ class RecordingService : LifecycleService() {
     }
 
     private fun updateNotification(message: String) {
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.presence_video_online)
-            .setContentTitle("Background Camera Recorder")
-            .setContentText(message)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .addAction(
-                NotificationCompat.Action(
-                    android.R.drawable.ic_media_pause,
-                    "HENTIKAN",
-                    PendingIntent.getService(
-                        this,
-                        1,
-                        Intent(this, RecordingService::class.java)
-                            .setAction(ACTION_STOP_RECORDING),
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-                )
-            )
-            .build()
         getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, notification)
+            .notify(NOTIFICATION_ID, buildNotification(message))
+    }
+
+    override fun onDestroy() {
+        removeFloatingOverlay()
+        try {
+            cameraProvider?.unbindAll()
+        } catch (_: Exception) {
+        }
+        super.onDestroy()
     }
 }
