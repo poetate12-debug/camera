@@ -212,11 +212,11 @@ class RecordingService : LifecycleService() {
     }
 
     private fun publishState(recording: Boolean, message: String) {
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+        val stateEditor = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
             .putBoolean(PREF_IS_RECORDING, recording)
             .putString(PREF_STATUS, message)
-            .putLong(PREF_STARTED_AT, 0L)
-            .apply()
+        if (!recording) stateEditor.putLong(PREF_STARTED_AT, 0L)
+        stateEditor.apply()
 
         val update = Intent(ACTION_STATE_CHANGED)
             .setPackage(packageName)
