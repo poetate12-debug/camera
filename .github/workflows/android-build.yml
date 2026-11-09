@@ -11,6 +11,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,26 +26,24 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug
+
       - name: Prepare Android signing key
+        if: ${{ env.HAS_SIGNING_KEY != '' }}
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
-            echo "Release signing secrets are missing. Add all four ANDROID_* repository secrets."
-            exit 1
-          fi
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release-key.jks"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release-key.jks" >> "$GITHUB_ENV"
 
-      - name: Build debug and signed release APK
+      - name: Build signed release APK
+        if: ${{ env.HAS_SIGNING_KEY != '' }}
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle --no-daemon assembleDebug assembleRelease
+        run: gradle --no-daemon assembleRelease
 
       - name: Upload APK files
         uses: actions/upload-artifact@v4
