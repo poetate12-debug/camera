@@ -42,7 +42,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="KONTROL MENGAMBANG"
+                android:text="PREVIEW & TOMBOL MELAYANG"
                 android:textColor="#F2F7FB"
                 android:textSize="15sp"
                 android:textStyle="bold" />
@@ -51,7 +51,15 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:text="Aktifkan preview dan tombol melayang"
+                android:text="Aktifkan tombol melayang"
+                android:textColor="#F2F7FB"
+                android:textSize="14sp" />
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/previewSwitch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Tampilkan preview kamera mini"
                 android:textColor="#F2F7FB"
                 android:textSize="14sp" />
             <Button
@@ -67,7 +75,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:text="Panel tetap tampil saat aplikasi diminimalkan. Panel menampilkan preview langsung, label kamera, status REC, dan tombol REC / STOP / GANTI KAMERA. Android tetap menampilkan indikator privasi kamera dan notifikasi layanan."
+                android:text="Tombol melayang berbentuk bulatan. Ketuk untuk membuka REC, STOP, dan ganti kamera. Preview tidak tampil kecuali opsi preview mini diaktifkan."
                 android:textColor="#8FA6BA"
                 android:textSize="12sp"
                 android:lineSpacingExtra="3dp" />
@@ -115,6 +123,36 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:text="DUAL CAMERA"
+                android:textColor="#F2F7FB"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/dualCameraSwitch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Rekam kamera depan + belakang bersamaan"
+                android:textColor="#F2F7FB"
+                android:textSize="14sp" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="Jika didukung perangkat, dua file video terpisah disimpan pada 720p. Jika tidak, aplikasi memberi pesan dan tidak memulai rekaman."
+                android:textColor="#8FA6BA"
+                android:textSize="12sp" />
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:background="#142536"
+            android:orientation="vertical"
+            android:padding="16dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
                 android:text="KUALITAS VIDEO"
                 android:textColor="#F2F7FB"
                 android:textSize="15sp"
@@ -145,7 +183,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="Catatan: kamera hanya dapat diganti saat rekaman berhenti. Pengaturan kualitas dan stabilisasi berlaku untuk rekaman berikutnya."
+            android:text="Catatan: kamera hanya dapat diganti saat rekaman berhenti. Mode dual membutuhkan dukungan perangkat dan menghasilkan dua file terpisah. Preview mini hanya aktif bila dipilih."
             android:textColor="#7893AA"
             android:textSize="11sp"
             android:lineSpacingExtra="4dp" />

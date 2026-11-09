@@ -24,6 +24,9 @@ import android.widget.TextView
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ConcurrentCamera
+import androidx.camera.core.ExperimentalCameraInfo
+import androidx.camera.core.UseCaseGroup
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
@@ -63,10 +66,14 @@ class RecordingService : LifecycleService() {
         private const val PREF_LENS_FACING = "lens_facing"
         private const val PREF_QUALITY = "video_quality"
         private const val PREF_STABILIZATION = "video_stabilization"
+        private const val PREF_PREVIEW_ENABLED = "floating_preview_enabled"
+        private const val PREF_DUAL_CAMERA = "dual_camera_enabled"
     }
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var activeRecording: androidx.camera.video.Recording? = null
+    private val activeDualRecordings = mutableListOf<androidx.camera.video.Recording>()
+    private var dualFinalizeCount = 0
     private var activePreview: Preview? = null
     private var startInProgress = false
     private var stopRequested = false
@@ -75,6 +82,8 @@ class RecordingService : LifecycleService() {
 
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
+    private var overlayBubble: Button? = null
+    private var overlayControls: View? = null
     private var overlayPreview: PreviewView? = null
     private var overlayStatus: TextView? = null
     private var overlayCameraLabel: TextView? = null
@@ -110,7 +119,9 @@ class RecordingService : LifecycleService() {
             ACTION_STOP_RECORDING -> {
                 stopRequested = true
                 val currentRecording = activeRecording
-                if (currentRecording != null) {
+                if (activeDualRecordings.isNotEmpty()) {
+                    activeDualRecordings.toList().forEach { it.stop() }
+                } else if (currentRecording != null) {
                     currentRecording.stop()
                 } else if (!startInProgress && !overlayEnabled) {
                     finishService("Rekaman dihentikan")
@@ -139,10 +150,13 @@ class RecordingService : LifecycleService() {
         }
         overlayEnabled = true
         disableOverlayAfterFinalize = false
-        startForegroundCompat("Kontrol kamera mengambang aktif • preview kamera")
+        startForegroundCompat("Kontrol kamera mengambang aktif")
         addFloatingOverlay()
-        bindPreviewOnly()
-        publishState(false, "Preview aktif • belum merekam")
+        overlayPreview?.visibility = if (isPreviewEnabled()) View.VISIBLE else View.GONE
+        if (isPreviewEnabled()) bindPreviewOnly() else {
+            try { cameraProvider?.unbindAll() } catch (_: Exception) {}
+        }
+        publishState(false, "Kontrol mengambang aktif • belum merekam")
     }
 
     private fun disableFloatingControls() {
@@ -180,6 +194,10 @@ class RecordingService : LifecycleService() {
             else -> Quality.FHD
         }
 
+    private fun isPreviewEnabled(): Boolean = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE).getBoolean(PREF_PREVIEW_ENABLED, false)
+
+    private fun isDualCameraEnabled(): Boolean = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE).getBoolean(PREF_DUAL_CAMERA, false)
+
     private fun isStabilizationEnabled(): Boolean =
         getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
             .getBoolean(PREF_STABILIZATION, true)
@@ -203,6 +221,10 @@ class RecordingService : LifecycleService() {
             return
         }
 
+        if (isDualCameraEnabled()) {
+            prepareDualCameraAndStartRecording()
+            return
+        }
         val providerFuture = ProcessCameraProvider.getInstance(applicationContext)
         providerFuture.addListener({
             if (stopRequested) {
@@ -248,7 +270,7 @@ class RecordingService : LifecycleService() {
                 }
 
                 val videoCapture = videoBuilder.build()
-                val previewUseCase = if (overlayEnabled) buildOverlayPreview() else null
+                val previewUseCase = if (overlayEnabled && isPreviewEnabled()) buildOverlayPreview() else null
                 if (previewUseCase != null) {
                     cameraProvider?.bindToLifecycle(this, selector, previewUseCase, videoCapture)
                     activePreview = previewUseCase
@@ -326,6 +348,92 @@ class RecordingService : LifecycleService() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    @OptIn(ExperimentalCameraInfo::class)
+    private fun prepareDualCameraAndStartRecording() {
+        val future = ProcessCameraProvider.getInstance(applicationContext)
+        future.addListener({
+            try {
+                val provider = future.get()
+                cameraProvider = provider
+                provider.unbindAll()
+                val pair = provider.availableConcurrentCameraInfos.firstOrNull { infos ->
+                    infos.size == 2 &&
+                        infos.any { it.lensFacing == CameraSelector.LENS_FACING_BACK } &&
+                        infos.any { it.lensFacing == CameraSelector.LENS_FACING_FRONT }
+                }
+                if (pair == null) {
+                    recoverAfterRecording("Mode dual tidak didukung perangkat ini. Gunakan mode satu kamera.")
+                    return@addListener
+                }
+                val backInfo = pair.first { it.lensFacing == CameraSelector.LENS_FACING_BACK }
+                val frontInfo = pair.first { it.lensFacing == CameraSelector.LENS_FACING_FRONT }
+                val quality = QualitySelector.from(Quality.HD, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))
+                val backRecorder = Recorder.Builder().setQualitySelector(quality).build()
+                val frontRecorder = Recorder.Builder().setQualitySelector(quality).build()
+                val backCapture = VideoCapture.withOutput(backRecorder)
+                val frontCapture = VideoCapture.withOutput(frontRecorder)
+                val backConfig = ConcurrentCamera.SingleCameraConfig(
+                    backInfo.cameraSelector, UseCaseGroup.Builder().addUseCase(backCapture).build(), this
+                )
+                val frontConfig = ConcurrentCamera.SingleCameraConfig(
+                    frontInfo.cameraSelector, UseCaseGroup.Builder().addUseCase(frontCapture).build(), this
+                )
+                provider.bindToLifecycle(listOf(backConfig, frontConfig))
+
+                fun outputOptions(label: String): MediaStoreOutputOptions {
+                    val values = android.content.ContentValues().apply {
+                        put(MediaStore.Video.Media.DISPLAY_NAME, "REC_DUAL_${label}_${System.currentTimeMillis()}.mp4")
+                        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                        put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/BackgroundCameraRecorder")
+                    }
+                    return MediaStoreOutputOptions.Builder(
+                        contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                    ).setContentValues(values).build()
+                }
+                val audioAllowed = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                dualFinalizeCount = 0
+                activeDualRecordings.clear()
+
+                fun startOne(recorder: Recorder, label: String) {
+                    var pending = recorder.prepareRecording(this, outputOptions(label))
+                    if (audioAllowed && label == "BACK") pending = pending.withAudioEnabled()
+                    val recording = pending.start(ContextCompat.getMainExecutor(this)) { event ->
+                        when (event) {
+                            is VideoRecordEvent.Start -> {
+                                if (activeDualRecordings.size == 2) {
+                                    startInProgress = false
+                                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                                        .putLong(PREF_STARTED_AT, System.currentTimeMillis()).apply()
+                                    publishState(true, "● DUAL REC • DEPAN + BELAKANG • 720p")
+                                    updateNotification("DUAL REC aktif • depan + belakang")
+                                    updateOverlayUi(true, "DUAL REC AKTIF")
+                                }
+                            }
+                            is VideoRecordEvent.Finalize -> {
+                                dualFinalizeCount++
+                                if (dualFinalizeCount >= 2) {
+                                    activeDualRecordings.clear()
+                                    activeRecording = null
+                                    val msg = if (event.hasError()) "Salah satu rekaman dual gagal (kode ${event.error})"
+                                        else "Dua video tersimpan • Movies/BackgroundCameraRecorder"
+                                    recoverAfterRecording(msg)
+                                }
+                            }
+                        }
+                    }
+                    activeDualRecordings.add(recording)
+                }
+                startOne(backRecorder, "BACK")
+                startOne(frontRecorder, "FRONT")
+                updateOverlayUi(true, "MENYIAPKAN DUAL CAMERA")
+            } catch (e: Exception) {
+                activeDualRecordings.toList().forEach { it.stop() }
+                activeDualRecordings.clear()
+                recoverAfterRecording("Dual camera tidak dapat dijalankan: " + (e.localizedMessage ?: e.javaClass.simpleName))
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
     private fun buildOverlayPreview(): Preview? {
         val previewView = overlayPreview ?: return null
         if (!overlayEnabled) return null
@@ -340,7 +448,7 @@ class RecordingService : LifecycleService() {
     }
 
     private fun bindPreviewOnly() {
-        if (!overlayEnabled || activeRecording != null || startInProgress) return
+        if (!overlayEnabled || !isPreviewEnabled() || activeRecording != null || startInProgress) return
         val previewView = overlayPreview ?: return
         val future = ProcessCameraProvider.getInstance(applicationContext)
         future.addListener({
@@ -369,9 +477,9 @@ class RecordingService : LifecycleService() {
         stopRequested = false
         publishState(false, message)
         if (overlayEnabled && !disableOverlayAfterFinalize) {
-            startForegroundCompat("Kontrol mengambang aktif • belum merekam")
+            startForegroundCompat("Kontrol mengambang aktif")
             updateOverlayUi(false, message)
-            bindPreviewOnly()
+            if (isPreviewEnabled()) bindPreviewOnly() else cameraProvider?.unbindAll()
             updateNotification("Kontrol mengambang aktif • belum merekam")
         } else {
             if (disableOverlayAfterFinalize) {
@@ -416,7 +524,10 @@ class RecordingService : LifecycleService() {
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             val view = LayoutInflater.from(this).inflate(R.layout.floating_camera_overlay, null)
             overlayView = view
+            overlayBubble = view.findViewById(R.id.floatingBubble)
+            overlayControls = view.findViewById(R.id.floatingControls)
             overlayPreview = view.findViewById(R.id.floatingPreviewView)
+            overlayPreview?.visibility = if (isPreviewEnabled()) View.VISIBLE else View.GONE
             overlayStatus = view.findViewById(R.id.floatingStatusText)
             overlayCameraLabel = view.findViewById(R.id.floatingCameraLabel)
             overlayQualityLabel = view.findViewById(R.id.floatingQualityLabel)
@@ -424,6 +535,43 @@ class RecordingService : LifecycleService() {
             overlayStopButton = view.findViewById(R.id.floatingStopButton)
             overlaySwitchButton = view.findViewById(R.id.floatingSwitchButton)
 
+            overlayBubble?.setOnClickListener {
+                overlayControls?.visibility = View.VISIBLE
+                overlayBubble?.visibility = View.GONE
+            }
+            overlayBubble?.setOnTouchListener { v, event ->
+                val params = overlayLayoutParams ?: return@setOnTouchListener false
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        initialX = params.x
+                        initialY = params.y
+                        bubbleDragged = false
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = (event.rawX - initialTouchX).toInt()
+                        val dy = (event.rawY - initialTouchY).toInt()
+                        if (kotlin.math.abs(dx) > dp(5) || kotlin.math.abs(dy) > dp(5)) {
+                            bubbleDragged = true
+                            params.x = initialX + dx
+                            params.y = initialY + dy
+                            try { windowManager?.updateViewLayout(overlayView, params) } catch (_: Exception) {}
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (!bubbleDragged) v.performClick()
+                        true
+                    }
+                    else -> true
+                }
+            }
+            view.findViewById<Button>(R.id.floatingCollapseButton)?.setOnClickListener {
+                overlayControls?.visibility = View.GONE
+                overlayBubble?.visibility = View.VISIBLE
+            }
             overlayRecButton?.setOnClickListener {
                 if (activeRecording == null && !startInProgress) {
                     stopRequested = false
@@ -435,7 +583,8 @@ class RecordingService : LifecycleService() {
             }
             overlayStopButton?.setOnClickListener {
                 stopRequested = true
-                activeRecording?.stop()
+                if (activeDualRecordings.isNotEmpty()) activeDualRecordings.toList().forEach { it.stop() }
+                else activeRecording?.stop()
             }
             overlaySwitchButton?.setOnClickListener {
                 switchCameraFromOverlay()
@@ -464,7 +613,7 @@ class RecordingService : LifecycleService() {
             }
 
             val params = WindowManager.LayoutParams(
-                dp(270),
+                WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -487,6 +636,7 @@ class RecordingService : LifecycleService() {
     private var initialX = 0
     private var initialY = 0
     private var initialTouchX = 0f
+    private var bubbleDragged = false
     private var initialTouchY = 0f
 
     private fun removeFloatingOverlay() {
@@ -498,6 +648,8 @@ class RecordingService : LifecycleService() {
             }
         }
         overlayView = null
+        overlayBubble = null
+        overlayControls = null
         overlayPreview = null
         overlayStatus = null
         overlayCameraLabel = null
@@ -509,7 +661,7 @@ class RecordingService : LifecycleService() {
     }
 
     private fun switchCameraFromOverlay() {
-        if (activeRecording != null || startInProgress) {
+        if (activeRecording != null || activeDualRecordings.isNotEmpty() || startInProgress) {
             setOverlayStatus("STOP rekaman sebelum mengganti kamera")
             return
         }
@@ -527,13 +679,14 @@ class RecordingService : LifecycleService() {
 
     private fun updateOverlayUi(recording: Boolean, status: String) {
         overlayStatus?.text = status
-        overlayCameraLabel?.text = cameraName()
+        overlayBubble?.text = if (recording || startInProgress) "● REC" else "CAM"
+        overlayCameraLabel?.text = if (isDualCameraEnabled()) "DEPAN + BELAKANG" else cameraName()
         overlayQualityLabel?.text = "Kualitas ${qualityName()}"
         overlayRecButton?.isEnabled = !recording && !startInProgress
-        overlayStopButton?.isEnabled = recording || startInProgress
-        overlaySwitchButton?.isEnabled = !recording && !startInProgress
+        overlayStopButton?.isEnabled = recording || activeDualRecordings.isNotEmpty() || startInProgress
+        overlaySwitchButton?.isEnabled = !recording && activeDualRecordings.isEmpty() && !startInProgress
         overlayRecButton?.alpha = if (!recording && !startInProgress) 1f else 0.55f
-        overlayStopButton?.alpha = if (recording || startInProgress) 1f else 0.55f
+        overlayStopButton?.alpha = if (recording || activeDualRecordings.isNotEmpty() || startInProgress) 1f else 0.55f
         overlaySwitchButton?.alpha = if (!recording && !startInProgress) 1f else 0.55f
     }
 
@@ -564,7 +717,7 @@ class RecordingService : LifecycleService() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val panelIdle = overlayEnabled && activeRecording == null && !startInProgress
+        val panelIdle = overlayEnabled && activeRecording == null && activeDualRecordings.isEmpty() && !startInProgress
         val stopServiceIntent = Intent(this, RecordingService::class.java)
             .setAction(if (panelIdle) ACTION_DISABLE_FLOATING else ACTION_STOP_RECORDING)
         val stopPendingIntent = PendingIntent.getService(

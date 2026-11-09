@@ -19,6 +19,8 @@ class SettingsActivity : ComponentActivity() {
     private lateinit var stabilizationSwitch: SwitchCompat
     private lateinit var cameraChoiceText: TextView
     private lateinit var qualitySpinner: Spinner
+    private lateinit var previewSwitch: SwitchCompat
+    private lateinit var dualCameraSwitch: SwitchCompat
     private var updatingSwitch = false
 
     companion object {
@@ -27,6 +29,8 @@ class SettingsActivity : ComponentActivity() {
         private const val PREF_LENS_FACING = "lens_facing"
         private const val PREF_QUALITY = "video_quality"
         private const val PREF_STABILIZATION = "video_stabilization"
+        private const val PREF_PREVIEW_ENABLED = "floating_preview_enabled"
+        private const val PREF_DUAL_CAMERA = "dual_camera_enabled"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,6 +38,8 @@ class SettingsActivity : ComponentActivity() {
         setContentView(R.layout.activity_settings)
 
         overlaySwitch = findViewById(R.id.floatingSwitch)
+        previewSwitch = findViewById(R.id.previewSwitch)
+        dualCameraSwitch = findViewById(R.id.dualCameraSwitch)
         stabilizationSwitch = findViewById(R.id.stabilizationSwitch)
         cameraChoiceText = findViewById(R.id.cameraChoiceText)
         qualitySpinner = findViewById(R.id.qualitySpinner)
@@ -77,6 +83,17 @@ class SettingsActivity : ComponentActivity() {
                 refreshFloatingService()
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
+
+        previewSwitch.isChecked = prefs.getBoolean(PREF_PREVIEW_ENABLED, false)
+        previewSwitch.setOnCheckedChangeListener { _, enabled ->
+            prefs.edit().putBoolean(PREF_PREVIEW_ENABLED, enabled).apply()
+            refreshFloatingService()
+        }
+        dualCameraSwitch.isChecked = prefs.getBoolean(PREF_DUAL_CAMERA, false)
+        dualCameraSwitch.setOnCheckedChangeListener { _, enabled ->
+            prefs.edit().putBoolean(PREF_DUAL_CAMERA, enabled).apply()
+            Toast.makeText(this, if (enabled) "Mode dual aktif jika perangkat mendukung" else "Mode satu kamera", Toast.LENGTH_SHORT).show()
         }
 
         stabilizationSwitch.isChecked = prefs.getBoolean(PREF_STABILIZATION, true)
