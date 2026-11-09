@@ -11,7 +11,6 @@ import androidx.activity.ComponentActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.camera.core.CameraSelector
 import androidx.core.content.ContextCompat
-import androidx.core.content.ContextCompat
 
 class SettingsActivity : ComponentActivity() {
     private lateinit var stabilizationSwitch: SwitchCompat
