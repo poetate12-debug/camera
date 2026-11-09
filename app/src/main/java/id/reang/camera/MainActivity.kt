@@ -9,6 +9,8 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.net.Uri
+import android.provider.Settings
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
@@ -16,12 +18,16 @@ import androidx.activity.ComponentActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.camera.core.CameraSelector
+import androidx.appcompat.widget.SwitchCompat
 
 class MainActivity : ComponentActivity() {
     private lateinit var statusText: TextView
     private lateinit var dialStatusText: TextView
     private lateinit var timerText: TextView
     private lateinit var recordButton: Button
+    private lateinit var floatingSwitch: SwitchCompat
+    private lateinit var overlayPermissionButton: Button
+    private var updatingFloatingSwitch = false
 
     private var isRecording = false
     private var receiverRegistered = false
@@ -39,6 +45,7 @@ class MainActivity : ComponentActivity() {
         private const val PREF_STARTED_AT = "recording_started_at"
         private const val CAMERA_PREFS = "camera_settings"
         private const val PREF_LENS_FACING = "lens_facing"
+        private const val PREF_FLOATING_ENABLED = "floating_enabled"
     }
 
     private val timerTicker = object : Runnable {
@@ -64,6 +71,16 @@ class MainActivity : ComponentActivity() {
         dialStatusText = findViewById(R.id.dialStatusText)
         timerText = findViewById(R.id.timerText)
         recordButton = findViewById(R.id.recordButton)
+        floatingSwitch = findViewById(R.id.floatingSwitchHome)
+        overlayPermissionButton = findViewById(R.id.overlayPermissionButtonHome)
+        floatingSwitch.isChecked = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
+            .getBoolean(PREF_FLOATING_ENABLED, false)
+        floatingSwitch.setOnCheckedChangeListener { _, enabled ->
+            if (updatingFloatingSwitch) return@setOnCheckedChangeListener
+            if (enabled) enableFloatingFromHome() else disableFloatingFromHome()
+        }
+        overlayPermissionButton.setOnClickListener { openOverlayPermissionSettings() }
+        updateFloatingPermissionLabel()
 
         recordButton.setOnClickListener {
             if (isRecording) stopRecording() else startRecording()
@@ -75,6 +92,15 @@ class MainActivity : ComponentActivity() {
         if (!allPermissionsGranted()) {
             ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_PERMISSIONS)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateFloatingPermissionLabel()
+        val prefs = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
+        updatingFloatingSwitch = true
+        floatingSwitch.isChecked = prefs.getBoolean(PREF_FLOATING_ENABLED, false)
+        updatingFloatingSwitch = false
     }
 
     override fun onStart() {
@@ -98,6 +124,70 @@ class MainActivity : ComponentActivity() {
             receiverRegistered = false
         }
         super.onStop()
+    }
+
+    private fun enableFloatingFromHome() {
+        if (!Settings.canDrawOverlays(this)) {
+            openOverlayPermissionSettings()
+            return
+        }
+        getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE).edit()
+            .putBoolean(PREF_FLOATING_ENABLED, true).apply()
+        ContextCompat.startForegroundService(
+            this,
+            Intent(this, RecordingService::class.java)
+                .setAction(RecordingService.ACTION_ENABLE_FLOATING)
+        )
+        Toast.makeText(this, "Floating Bubble diaktifkan", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun disableFloatingFromHome() {
+        getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE).edit()
+            .putBoolean(PREF_FLOATING_ENABLED, false).apply()
+        startService(
+            Intent(this, RecordingService::class.java)
+                .setAction(RecordingService.ACTION_DISABLE_FLOATING)
+        )
+        Toast.makeText(this, "Floating Bubble dinonaktifkan", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun openOverlayPermissionSettings() {
+        if (Settings.canDrawOverlays(this)) {
+            enableFloatingFromHome()
+            return
+        }
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+        @Suppress("DEPRECATION")
+        startActivityForResult(intent, 301)
+    }
+
+    @Deprecated("Use Activity Result API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 301) {
+            val granted = Settings.canDrawOverlays(this)
+            if (granted) {
+                enableFloatingFromHome()
+            } else {
+                updatingFloatingSwitch = true
+                floatingSwitch.isChecked = false
+                updatingFloatingSwitch = false
+            }
+            updateFloatingPermissionLabel()
+        }
+    }
+
+    private fun updateFloatingPermissionLabel() {
+        if (::overlayPermissionButton.isInitialized) {
+            overlayPermissionButton.text = if (Settings.canDrawOverlays(this)) {
+                "IZIN OVERLAY SUDAH AKTIF"
+            } else {
+                "BERI IZIN TAMPIL DI ATAS APLIKASI"
+            }
+        }
     }
 
     private fun allPermissionsGranted(): Boolean = REQUIRED_PERMISSIONS.all {

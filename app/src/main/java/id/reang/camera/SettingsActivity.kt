@@ -1,9 +1,7 @@
 package id.reang.camera
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
-import android.provider.Settings
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.Spinner
@@ -15,18 +13,16 @@ import androidx.camera.core.CameraSelector
 import androidx.core.content.ContextCompat
 
 class SettingsActivity : ComponentActivity() {
-    private lateinit var overlaySwitch: SwitchCompat
     private lateinit var stabilizationSwitch: SwitchCompat
     private lateinit var cameraChoiceText: TextView
     private lateinit var qualitySpinner: Spinner
     private lateinit var previewSwitch: SwitchCompat
     private lateinit var dualCameraSwitch: SwitchCompat
-    private var updatingSwitch = false
 
     companion object {
         private const val CAMERA_PREFS = "camera_settings"
-        private const val PREF_FLOATING_ENABLED = "floating_enabled"
         private const val PREF_LENS_FACING = "lens_facing"
+        private const val PREF_FLOATING_ENABLED = "floating_enabled"
         private const val PREF_QUALITY = "video_quality"
         private const val PREF_STABILIZATION = "video_stabilization"
         private const val PREF_PREVIEW_ENABLED = "floating_preview_enabled"
@@ -37,7 +33,6 @@ class SettingsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
-        overlaySwitch = findViewById(R.id.floatingSwitch)
         previewSwitch = findViewById(R.id.previewSwitch)
         dualCameraSwitch = findViewById(R.id.dualCameraSwitch)
         stabilizationSwitch = findViewById(R.id.stabilizationSwitch)
@@ -45,9 +40,6 @@ class SettingsActivity : ComponentActivity() {
         qualitySpinner = findViewById(R.id.qualitySpinner)
 
         findViewById<Button>(R.id.backButton).setOnClickListener { finish() }
-        findViewById<Button>(R.id.overlayPermissionButton).setOnClickListener {
-            openOverlayPermissionSettings()
-        }
         findViewById<Button>(R.id.switchCameraButton).setOnClickListener {
             switchCamera()
         }
@@ -101,83 +93,12 @@ class SettingsActivity : ComponentActivity() {
             prefs.edit().putBoolean(PREF_STABILIZATION, enabled).apply()
         }
 
-        overlaySwitch.isChecked = prefs.getBoolean(PREF_FLOATING_ENABLED, false)
-        overlaySwitch.setOnCheckedChangeListener { _, enabled ->
-            if (updatingSwitch) return@setOnCheckedChangeListener
-            if (enabled) {
-                if (Settings.canDrawOverlays(this)) {
-                    enableFloatingControls()
-                } else {
-                    openOverlayPermissionSettings()
-                }
-            } else {
-                prefs.edit().putBoolean(PREF_FLOATING_ENABLED, false).apply()
-                val intent = Intent(this, RecordingService::class.java)
-                    .setAction(RecordingService.ACTION_DISABLE_FLOATING)
-                startService(intent)
-            }
-        }
         updateCameraChoice()
     }
 
     override fun onResume() {
         super.onResume()
-        val granted = Settings.canDrawOverlays(this)
-        findViewById<Button>(R.id.overlayPermissionButton).text =
-            if (granted) "IZIN OVERLAY SUDAH AKTIF" else "BERI IZIN TAMPIL DI ATAS APLIKASI"
-        if (overlaySwitch.isChecked && granted) {
-            enableFloatingControls()
-        } else if (overlaySwitch.isChecked && !granted) {
-            updatingSwitch = true
-            overlaySwitch.isChecked = false
-            updatingSwitch = false
-        }
         updateCameraChoice()
-    }
-
-    private fun openOverlayPermissionSettings() {
-        if (Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "Izin overlay sudah aktif", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val intent = Intent(
-            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            Uri.parse("package:$packageName")
-        )
-        @Suppress("DEPRECATION")
-        startActivityForResult(intent, 301)
-    }
-
-    @Deprecated("Use Activity Result API")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 301 && Settings.canDrawOverlays(this)) {
-            enableFloatingControls()
-        }
-    }
-
-    private fun enableFloatingControls() {
-        if (!Settings.canDrawOverlays(this)) return
-        getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE).edit()
-            .putBoolean(PREF_FLOATING_ENABLED, true)
-            .apply()
-        updatingSwitch = true
-        overlaySwitch.isChecked = true
-        updatingSwitch = false
-        val intent = Intent(this, RecordingService::class.java)
-            .setAction(RecordingService.ACTION_ENABLE_FLOATING)
-        ContextCompat.startForegroundService(this, intent)
-    }
-
-    private fun refreshFloatingService() {
-        if (!Settings.canDrawOverlays(this)) return
-        val enabled = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
-            .getBoolean(PREF_FLOATING_ENABLED, false)
-        if (enabled) {
-            val intent = Intent(this, RecordingService::class.java)
-                .setAction(RecordingService.ACTION_ENABLE_FLOATING)
-            ContextCompat.startForegroundService(this, intent)
-        }
     }
 
     private fun switchCamera() {

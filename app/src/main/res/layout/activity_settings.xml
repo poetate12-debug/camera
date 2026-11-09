@@ -42,43 +42,25 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="PREVIEW &amp; TOMBOL MELAYANG"
+                android:text="PREVIEW MINI"
                 android:textColor="#F2F7FB"
                 android:textSize="15sp"
                 android:textStyle="bold" />
             <androidx.appcompat.widget.SwitchCompat
-                android:id="@+id/floatingSwitch"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:text="Aktifkan tombol melayang"
-                android:textColor="#F2F7FB"
-                android:textSize="14sp" />
-            <androidx.appcompat.widget.SwitchCompat
                 android:id="@+id/previewSwitch"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="Tampilkan preview kamera mini"
+                android:layout_marginTop="10dp"
+                android:text="Tampilkan preview kamera mini di panel"
                 android:textColor="#F2F7FB"
                 android:textSize="14sp" />
-            <Button
-                android:id="@+id/overlayPermissionButton"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="12dp"
-                android:backgroundTint="#24506A"
-                android:text="BERI IZIN TAMPIL DI ATAS APLIKASI"
-                android:textColor="#FFFFFF"
-                android:textSize="12sp" />
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="Tombol melayang berbentuk bulatan. Ketuk untuk membuka REC, STOP, dan ganti kamera. Preview tidak tampil kecuali opsi preview mini diaktifkan."
+                android:layout_marginTop="5dp"
+                android:text="Nonaktif secara default. Jika diaktifkan, preview hanya muncul kecil di panel kontrol mengambang."
                 android:textColor="#8FA6BA"
-                android:textSize="12sp"
-                android:lineSpacingExtra="3dp" />
+                android:textSize="12sp" />
         </LinearLayout>
 
         <LinearLayout
