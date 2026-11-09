@@ -104,9 +104,11 @@ class RecordingService : LifecycleService() {
         when (intent?.action) {
             ACTION_ENABLE_FLOATING -> enableFloatingControls()
             ACTION_DISABLE_FLOATING -> {
-                if (activeRecording != null || startInProgress) {
+                if (activeRecording != null || activeDualRecordings.isNotEmpty() || startInProgress) {
                     disableOverlayAfterFinalize = true
-                    setOverlayStatus("Hentikan rekaman sebelum menutup panel")
+                    if (activeDualRecordings.isNotEmpty()) activeDualRecordings.toList().forEach { it.stop() }
+                    else activeRecording?.stop()
+                    setOverlayStatus("Menghentikan rekaman sebelum menutup panel")
                 } else {
                     disableFloatingControls()
                 }
@@ -152,10 +154,7 @@ class RecordingService : LifecycleService() {
         disableOverlayAfterFinalize = false
         startForegroundCompat("Kontrol kamera mengambang aktif")
         addFloatingOverlay()
-        overlayPreview?.visibility = if (isPreviewEnabled()) View.VISIBLE else View.GONE
-        if (isPreviewEnabled()) bindPreviewOnly() else {
-            try { cameraProvider?.unbindAll() } catch (_: Exception) {}
-        }
+        if (isPreviewEnabled()) bindPreviewOnly()
         publishState(false, "Kontrol mengambang aktif • belum merekam")
     }
 
@@ -539,35 +538,6 @@ class RecordingService : LifecycleService() {
                 overlayControls?.visibility = View.VISIBLE
                 overlayBubble?.visibility = View.GONE
             }
-            overlayBubble?.setOnTouchListener { v, event ->
-                val params = overlayLayoutParams ?: return@setOnTouchListener false
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        initialTouchX = event.rawX
-                        initialTouchY = event.rawY
-                        initialX = params.x
-                        initialY = params.y
-                        bubbleDragged = false
-                        true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        val dx = (event.rawX - initialTouchX).toInt()
-                        val dy = (event.rawY - initialTouchY).toInt()
-                        if (kotlin.math.abs(dx) > dp(5) || kotlin.math.abs(dy) > dp(5)) {
-                            bubbleDragged = true
-                            params.x = initialX + dx
-                            params.y = initialY + dy
-                            try { windowManager?.updateViewLayout(overlayView, params) } catch (_: Exception) {}
-                        }
-                        true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        if (!bubbleDragged) v.performClick()
-                        true
-                    }
-                    else -> true
-                }
-            }
             view.findViewById<Button>(R.id.floatingCollapseButton)?.setOnClickListener {
                 overlayControls?.visibility = View.GONE
                 overlayBubble?.visibility = View.VISIBLE
@@ -636,7 +606,6 @@ class RecordingService : LifecycleService() {
     private var initialX = 0
     private var initialY = 0
     private var initialTouchX = 0f
-    private var bubbleDragged = false
     private var initialTouchY = 0f
 
     private fun removeFloatingOverlay() {
@@ -680,7 +649,7 @@ class RecordingService : LifecycleService() {
     private fun updateOverlayUi(recording: Boolean, status: String) {
         overlayStatus?.text = status
         overlayBubble?.text = if (recording || startInProgress) "● REC" else "CAM"
-        overlayCameraLabel?.text = if (isDualCameraEnabled()) "DEPAN + BELAKANG" else cameraName()
+        overlayCameraLabel?.text = cameraName()
         overlayQualityLabel?.text = "Kualitas ${qualityName()}"
         overlayRecButton?.isEnabled = !recording && !startInProgress
         overlayStopButton?.isEnabled = recording || activeDualRecordings.isNotEmpty() || startInProgress
