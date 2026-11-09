@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.camera.core.CameraSelector
 import androidx.core.content.ContextCompat
+import androidx.core.content.ContextCompat
 
 class SettingsActivity : ComponentActivity() {
     private lateinit var stabilizationSwitch: SwitchCompat
@@ -99,6 +100,15 @@ class SettingsActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         updateCameraChoice()
+    }
+
+    private fun refreshFloatingService() {
+        val prefs = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
+        if (prefs.getBoolean(PREF_FLOATING_ENABLED, false)) {
+            val intent = Intent(this, RecordingService::class.java)
+                .setAction(RecordingService.ACTION_ENABLE_FLOATING)
+            ContextCompat.startForegroundService(this, intent)
+        }
     }
 
     private fun switchCamera() {
