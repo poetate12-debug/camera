@@ -7,36 +7,25 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.camera.camera2.interop.Camera2Interop
-import androidx.camera.core.Camera
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.video.Quality
-import androidx.camera.video.QualitySelector
-import androidx.camera.video.Recorder
-import androidx.camera.video.VideoCapture
-import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import java.util.concurrent.TimeUnit
+import androidx.camera.core.CameraSelector
 
 class MainActivity : ComponentActivity() {
-    private lateinit var previewView: PreviewView
     private lateinit var statusText: TextView
+    private lateinit var dialStatusText: TextView
+    private lateinit var timerText: TextView
     private lateinit var recordButton: Button
 
-    private var cameraProvider: ProcessCameraProvider? = null
-    private var videoCapture: VideoCapture<Recorder>? = null
-    private var camera: Camera? = null
-    private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var isRecording = false
     private var receiverRegistered = false
+    private val handler = Handler(Looper.getMainLooper())
 
     companion object {
         private const val REQUEST_PERMISSIONS = 100
@@ -47,20 +36,23 @@ class MainActivity : ComponentActivity() {
         private const val PREFS_NAME = "recording_state"
         private const val PREF_IS_RECORDING = "is_recording"
         private const val PREF_STATUS = "status_text"
+        private const val PREF_STARTED_AT = "recording_started_at"
+        private const val CAMERA_PREFS = "camera_settings"
+        private const val PREF_LENS_FACING = "lens_facing"
+    }
+
+    private val timerTicker = object : Runnable {
+        override fun run() {
+            updateDuration()
+            handler.postDelayed(this, 1000L)
+        }
     }
 
     private val recordingStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             intent ?: return
             isRecording = intent.getBooleanExtra(RecordingService.EXTRA_IS_RECORDING, false)
-            val message = intent.getStringExtra(RecordingService.EXTRA_STATUS)
-            renderRecordingState(message)
-            if (!isRecording &&
-                lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
-                allPermissionsGranted()
-            ) {
-                startCamera()
-            }
+            renderRecordingState(intent.getStringExtra(RecordingService.EXTRA_STATUS))
         }
     }
 
@@ -68,26 +60,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        previewView = findViewById(R.id.previewView)
         statusText = findViewById(R.id.statusText)
+        dialStatusText = findViewById(R.id.dialStatusText)
+        timerText = findViewById(R.id.timerText)
         recordButton = findViewById(R.id.recordButton)
 
         recordButton.setOnClickListener {
             if (isRecording) stopRecording() else startRecording()
         }
-
-        findViewById<Button>(R.id.switchCameraButton).setOnClickListener {
-            if (isRecording) {
-                Toast.makeText(this, "Hentikan rekaman sebelum mengganti kamera", Toast.LENGTH_SHORT).show()
-            } else {
-                lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                    CameraSelector.LENS_FACING_FRONT
-                } else {
-                    CameraSelector.LENS_FACING_BACK
-                }
-                cameraProvider?.unbindAll()
-                startCamera()
-            }
+        findViewById<Button>(R.id.settingsButton).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
         }
 
         if (!allPermissionsGranted()) {
@@ -105,15 +87,12 @@ class MainActivity : ComponentActivity() {
         )
         receiverRegistered = true
         refreshRecordingState()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        refreshRecordingState()
-        if (!isRecording && allPermissionsGranted()) startCamera()
+        handler.removeCallbacks(timerTicker)
+        handler.post(timerTicker)
     }
 
     override fun onStop() {
+        handler.removeCallbacks(timerTicker)
         if (receiverRegistered) {
             unregisterReceiver(recordingStateReceiver)
             receiverRegistered = false
@@ -132,9 +111,10 @@ class MainActivity : ComponentActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_PERMISSIONS && allPermissionsGranted()) {
-            startCamera()
+            statusText.text = "Izin kamera dan mikrofon sudah diberikan"
         } else if (requestCode == REQUEST_PERMISSIONS) {
             statusText.text = "Izin kamera dan mikrofon diperlukan"
+            Toast.makeText(this, "Berikan izin kamera dan mikrofon untuk merekam", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -146,75 +126,44 @@ class MainActivity : ComponentActivity() {
 
     private fun renderRecordingState(message: String?) {
         recordButton.text = if (isRecording) "HENTIKAN REKAMAN" else "MULAI MEREKAM"
-        if (!message.isNullOrBlank()) {
-            statusText.text = message
+        if (isRecording) {
+            dialStatusText.text = "● REC AKTIF"
+            dialStatusText.setTextColor(0xFFFF5B65.toInt())
+            statusText.text = message ?: "Kamera sedang merekam"
+            recordButton.backgroundTintList =
+                android.content.res.ColorStateList.valueOf(0xFFE05260.toInt())
+            recordButton.setTextColor(0xFFFFFFFF.toInt())
         } else {
-            statusText.text = if (isRecording) {
-                "● MEREKAM • Rekaman tetap berjalan saat kembali ke Home"
-            } else {
-                "Siap merekam"
-            }
+            dialStatusText.text = "SIAP"
+            dialStatusText.setTextColor(0xFF36D9C1.toInt())
+            statusText.text = message ?: "Siap merekam"
+            recordButton.backgroundTintList =
+                android.content.res.ColorStateList.valueOf(0xFF20BFA9.toInt())
+            recordButton.setTextColor(0xFF061A1A.toInt())
         }
+        updateDuration()
     }
 
-    private fun startCamera() {
-        if (isRecording || !allPermissionsGranted()) return
-
-        val future = ProcessCameraProvider.getInstance(this)
-        future.addListener({
-            // Jangan memasang ulang kamera milik Activity jika service rekaman
-            // sudah mengambil alih kamera saat proses provider sedang disiapkan.
-            if (isRecording || isFinishing) return@addListener
-
-            try {
-                cameraProvider = future.get()
-                val previewBuilder = Preview.Builder()
-                Camera2Interop.Extender(previewBuilder).setCaptureRequestOption(
-                    android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE,
-                    android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
-                )
-                val preview = previewBuilder.build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
-
-                val recorder = Recorder.Builder()
-                    .setQualitySelector(QualitySelector.from(Quality.FHD))
-                    .build()
-                val videoBuilder = VideoCapture.Builder(recorder)
-                Camera2Interop.Extender(videoBuilder).setCaptureRequestOption(
-                    android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE,
-                    android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
-                )
-                videoCapture = videoBuilder.build()
-
-                val selector = CameraSelector.Builder()
-                    .requireLensFacing(lensFacing)
-                    .build()
-
-                cameraProvider?.unbindAll()
-                camera = cameraProvider?.bindToLifecycle(
-                    this,
-                    selector,
-                    preview,
-                    videoCapture
-                )
-                statusText.text = "Kamera aktif • Continuous Video AF"
-
-                if (previewView.width > 0 && previewView.height > 0) {
-                    val point = previewView.meteringPointFactory.createPoint(
-                        previewView.width / 2f,
-                        previewView.height / 2f
-                    )
-                    camera?.cameraControl?.startFocusAndMetering(
-                        androidx.camera.core.FocusMeteringAction.Builder(point)
-                            .setAutoCancelDuration(5, TimeUnit.SECONDS)
-                            .build()
-                    )
-                }
-            } catch (e: Exception) {
-                statusText.text = "Kamera gagal dibuka: " + (e.localizedMessage ?: "kesalahan tidak diketahui")
-            }
-        }, ContextCompat.getMainExecutor(this))
+    private fun updateDuration() {
+        if (!isRecording) {
+            timerText.text = "00:00"
+            return
+        }
+        val startedAt = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .getLong(PREF_STARTED_AT, 0L)
+        if (startedAt <= 0L) {
+            timerText.text = "--:--"
+            return
+        }
+        val seconds = ((System.currentTimeMillis() - startedAt) / 1000L).coerceAtLeast(0L)
+        val hours = seconds / 3600L
+        val minutes = (seconds % 3600L) / 60L
+        val remainder = seconds % 60L
+        timerText.text = if (hours > 0) {
+            "%02d:%02d:%02d".format(hours, minutes, remainder)
+        } else {
+            "%02d:%02d".format(minutes, remainder)
+        }
     }
 
     private fun startRecording() {
@@ -223,21 +172,19 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        // Lepaskan use case milik Activity sebelum service mengikat kamera
-        // ke lifecycle service yang tetap hidup setelah Activity masuk Home.
-        cameraProvider?.unbindAll()
-        camera = null
-        videoCapture = null
         isRecording = true
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
             .putBoolean(PREF_IS_RECORDING, true)
+            .putLong(PREF_STARTED_AT, 0L)
             .putString(PREF_STATUS, "Menyiapkan kamera untuk merekam...")
             .apply()
         renderRecordingState("Menyiapkan kamera untuk merekam...")
 
+        val selectedLens = getSharedPreferences(CAMERA_PREFS, MODE_PRIVATE)
+            .getInt(PREF_LENS_FACING, CameraSelector.LENS_FACING_BACK)
         val serviceIntent = Intent(this, RecordingService::class.java)
             .setAction(RecordingService.ACTION_START_RECORDING)
-            .putExtra(RecordingService.EXTRA_LENS_FACING, lensFacing)
+            .putExtra(RecordingService.EXTRA_LENS_FACING, selectedLens)
 
         try {
             ContextCompat.startForegroundService(this, serviceIntent)
@@ -245,6 +192,7 @@ class MainActivity : ComponentActivity() {
             isRecording = false
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
                 .putBoolean(PREF_IS_RECORDING, false)
+                .putLong(PREF_STARTED_AT, 0L)
                 .putString(PREF_STATUS, "Layanan rekaman gagal dimulai")
                 .apply()
             renderRecordingState("Layanan rekaman gagal dimulai")
@@ -253,7 +201,6 @@ class MainActivity : ComponentActivity() {
                 "Tidak dapat memulai layanan: " + (e.localizedMessage ?: "kesalahan"),
                 Toast.LENGTH_LONG
             ).show()
-            startCamera()
         }
     }
 

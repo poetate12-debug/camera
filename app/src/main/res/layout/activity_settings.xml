@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0B1420"
+    android:fillViewport="true">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+        <Button
+            android:id="@+id/backButton"
+            android:layout_width="wrap_content"
+            android:layout_height="42dp"
+            android:backgroundTint="#1B3042"
+            android:text="‹  KEMBALI"
+            android:textColor="#EAF4FA" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:text="PENGATURAN"
+            android:textColor="#FFFFFF"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:text="Atur tampilan preview dan kamera."
+            android:textColor="#8FA6BA"
+            android:textSize="13sp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:background="#142536"
+            android:orientation="vertical"
+            android:padding="16dp">
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/previewSwitch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Tampilkan preview kecil"
+                android:textColor="#F2F7FB"
+                android:textSize="15sp"
+                app:showText="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="Preview hanya muncul di halaman pengaturan dan tidak disimpan sebagai gambar."
+                android:textColor="#8FA6BA"
+                android:textSize="12sp" />
+            <FrameLayout
+                android:id="@+id/previewContainer"
+                android:layout_width="match_parent"
+                android:layout_height="132dp"
+                android:layout_marginTop="14dp"
+                android:background="#09131D"
+                android:visibility="gone">
+                <androidx.camera.view.PreviewView
+                    android:id="@+id/settingsPreviewView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    app:implementationMode="compatible"
+                    app:scaleType="fillCenter" />
+                <TextView
+                    android:id="@+id/previewStatusText"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:padding="12dp"
+                    android:text="Preview kamera"
+                    android:textColor="#C4D5E2"
+                    android:textSize="12sp" />
+            </FrameLayout>
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:background="#142536"
+            android:orientation="vertical"
+            android:padding="16dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="KAMERA"
+                android:textColor="#F2F7FB"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/cameraChoiceText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Kamera belakang"
+                android:textColor="#8FA6BA"
+                android:textSize="12sp" />
+            <Button
+                android:id="@+id/switchCameraButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="12dp"
+                android:backgroundTint="#24506A"
+                android:text="GANTI KAMERA"
+                android:textColor="#FFFFFF" />
+        </LinearLayout>
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:lineSpacingExtra="4dp"
+            android:text="Saat rekaman aktif, preview pengaturan tidak tersedia karena kamera sedang digunakan oleh layanan perekaman. Status rekaman tetap ditampilkan di aplikasi dan notifikasi."
+            android:textColor="#7893AA"
+            android:textSize="11sp" />
+    </LinearLayout>
+</ScrollView>

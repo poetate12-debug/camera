@@ -6,15 +6,13 @@ plugins {
 android {
     namespace = "id.reang.camera"
     compileSdk = 35
-
     defaultConfig {
         applicationId = "id.reang.camera"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
     }
-
     signingConfigs {
         create("release") {
             storeFile = file(System.getenv("ANDROID_KEYSTORE_PATH") ?: "release-key.jks")
@@ -23,7 +21,6 @@ android {
             keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
         }
     }
-
     buildTypes {
         debug { }
         release {
@@ -32,14 +29,12 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
 }
-
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")

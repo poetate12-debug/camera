@@ -39,6 +39,7 @@ class RecordingService : LifecycleService() {
         private const val PREFS_NAME = "recording_state"
         private const val PREF_IS_RECORDING = "is_recording"
         private const val PREF_STATUS = "status_text"
+        private const val PREF_STARTED_AT = "recording_started_at"
     }
 
     private var cameraProvider: ProcessCameraProvider? = null
@@ -162,6 +163,9 @@ class RecordingService : LifecycleService() {
                     when (event) {
                         is VideoRecordEvent.Start -> {
                             startInProgress = false
+                            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                                .putLong(PREF_STARTED_AT, System.currentTimeMillis())
+                                .apply()
                             publishState(
                                 true,
                                 "● MEREKAM • Tetap berjalan saat aplikasi di Home"
@@ -211,6 +215,7 @@ class RecordingService : LifecycleService() {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
             .putBoolean(PREF_IS_RECORDING, recording)
             .putString(PREF_STATUS, message)
+            .putLong(PREF_STARTED_AT, 0L)
             .apply()
 
         val update = Intent(ACTION_STATE_CHANGED)
