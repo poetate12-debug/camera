@@ -90,33 +90,33 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="7dp"
-            android:orientation="horizontal">
+            android:orientation="vertical">
             <Button
                 android:id="@+id/floatingRecButton"
-                android:layout_width="72dp"
-                android:layout_height="40dp"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
                 android:backgroundTint="#D9364A"
-                android:text="● REC"
+                android:text="● MULAI REKAM"
                 android:textColor="#FFFFFF"
-                android:textSize="10sp" />
+                android:textSize="11sp" />
             <Button
                 android:id="@+id/floatingStopButton"
-                android:layout_width="72dp"
-                android:layout_height="40dp"
-                android:layout_marginStart="4dp"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:layout_marginTop="6dp"
                 android:backgroundTint="#455C70"
-                android:text="■ STOP"
+                android:text="■ STOP REKAMAN"
                 android:textColor="#FFFFFF"
-                android:textSize="10sp" />
+                android:textSize="11sp" />
             <Button
                 android:id="@+id/floatingSwitchButton"
-                android:layout_width="72dp"
-                android:layout_height="40dp"
-                android:layout_marginStart="4dp"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:layout_marginTop="6dp"
                 android:backgroundTint="#24506A"
-                android:text="GANTI"
+                android:text="⇄ GANTI KAMERA"
                 android:textColor="#FFFFFF"
-                android:textSize="10sp" />
+                android:textSize="11sp" />
         </LinearLayout>
         <TextView
             android:layout_width="match_parent"
