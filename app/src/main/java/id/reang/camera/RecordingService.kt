@@ -116,7 +116,7 @@ class RecordingService : LifecycleService() {
             ACTION_SWITCH_CAMERA -> switchCameraFromOverlay()
             ACTION_REFRESH_CAMERA -> {
                 updateOverlayUi(activeRecording != null || startInProgress, "Pengaturan kamera diperbarui")
-                bindPreviewOnly()
+                refreshPreviewBinding()
             }
             ACTION_STOP_RECORDING -> {
                 stopRequested = true
@@ -446,6 +446,21 @@ class RecordingService : LifecycleService() {
         }
     }
 
+    private fun refreshPreviewBinding() {
+        val previewView = overlayPreview
+        if (!overlayEnabled || previewView == null) return
+        if (!isPreviewEnabled()) {
+            previewView.visibility = View.GONE
+            if (activeRecording == null && !startInProgress) {
+                try { cameraProvider?.unbindAll() } catch (_: Exception) {}
+                activePreview = null
+            }
+            return
+        }
+        previewView.visibility = View.VISIBLE
+        if (activeRecording == null && !startInProgress) bindPreviewOnly()
+    }
+
     private fun bindPreviewOnly() {
         if (!overlayEnabled || !isPreviewEnabled() || activeRecording != null || startInProgress) return
         val previewView = overlayPreview ?: return
@@ -648,7 +663,7 @@ class RecordingService : LifecycleService() {
 
     private fun updateOverlayUi(recording: Boolean, status: String) {
         overlayStatus?.text = status
-        overlayBubble?.text = if (recording || startInProgress) "● REC" else "CAM"
+        overlayBubble?.text = if (recording || startInProgress) "●" else ""
         overlayCameraLabel?.text = cameraName()
         overlayQualityLabel?.text = "Kualitas ${qualityName()}"
         overlayRecButton?.isEnabled = !recording && !startInProgress
