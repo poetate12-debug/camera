@@ -3,56 +3,83 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content">
+
     <Button
         android:id="@+id/floatingBubble"
-        android:layout_width="54dp"
-        android:layout_height="54dp"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
         android:background="@drawable/floating_bubble"
         android:minWidth="0dp"
         android:minHeight="0dp"
         android:padding="0dp"
         android:text=""
-        android:textColor="#FFFFFF"
-        android:textSize="11sp"
-        android:textStyle="bold" />
+        android:contentDescription="Buka kontrol kamera"
+        android:elevation="10dp" />
+
     <LinearLayout
         android:id="@+id/floatingControls"
-        android:layout_width="wrap_content"
+        android:layout_width="178dp"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:background="#F0162635"
-        android:padding="8dp"
+        android:background="@drawable/floating_panel_background"
+        android:elevation="14dp"
+        android:padding="10dp"
         android:visibility="gone">
+
         <LinearLayout
             android:id="@+id/floatingHeader"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="end">
+            android:layout_height="36dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:id="@+id/floatingDragHandle"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center_vertical|start"
+                android:contentDescription="Geser panel kamera">
+
+                <View
+                    android:layout_width="32dp"
+                    android:layout_height="4dp"
+                    android:background="@drawable/floating_grip" />
+            </LinearLayout>
+
             <Button
                 android:id="@+id/floatingCollapseButton"
-                android:layout_width="30dp"
-                android:layout_height="30dp"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/floating_button_subtle"
                 android:minWidth="0dp"
                 android:minHeight="0dp"
+                android:padding="0dp"
                 android:text="−"
-                android:textSize="16sp" />
+                android:textColor="#E6F0F5"
+                android:textSize="18sp"
+                android:contentDescription="Kecilkan panel" />
+
             <Button
                 android:id="@+id/floatingCloseButton"
-                android:layout_width="30dp"
-                android:layout_height="30dp"
-                android:layout_marginStart="5dp"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/floating_button_close"
                 android:minWidth="0dp"
                 android:minHeight="0dp"
-                android:backgroundTint="#B52D3D"
+                android:padding="0dp"
                 android:text="×"
                 android:textColor="#FFFFFF"
-                android:textSize="15sp" />
+                android:textSize="17sp"
+                android:contentDescription="Tutup floating kamera" />
         </LinearLayout>
+
         <androidx.camera.view.PreviewView
             android:id="@+id/floatingPreviewView"
-            android:layout_width="152dp"
-            android:layout_height="86dp"
-            android:layout_marginTop="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="88dp"
+            android:layout_marginTop="6dp"
             android:background="#090E14"
             android:visibility="gone"
             app:implementationMode="compatible"
@@ -63,73 +90,89 @@
             android:layout_width="1dp"
             android:layout_height="1dp"
             android:visibility="gone" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="5dp"
+            android:layout_marginTop="8dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
+
             <TextView
                 android:id="@+id/floatingCameraLabel"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
                 android:text="KAMERA BELAKANG"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp"
+                android:textColor="#F1F6F9"
+                android:textSize="10sp"
                 android:textStyle="bold" />
+
             <TextView
                 android:id="@+id/floatingQualityLabel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/floating_quality_chip"
+                android:paddingStart="7dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="7dp"
+                android:paddingBottom="4dp"
                 android:text="1080p"
-                android:textColor="#AFC3D4"
-                android:textSize="11sp"
+                android:textColor="#C5F5EE"
+                android:textSize="10sp"
                 android:textStyle="bold" />
         </LinearLayout>
+
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="5dp"
+            android:layout_marginTop="9dp"
             android:gravity="center_horizontal"
             android:orientation="vertical">
+
             <Button
                 android:id="@+id/floatingRecButton"
-                android:layout_width="42dp"
-                android:layout_height="42dp"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:background="@drawable/floating_button_rec"
                 android:minWidth="0dp"
                 android:minHeight="0dp"
                 android:padding="0dp"
-                android:backgroundTint="#D9364A"
                 android:text="●"
                 android:textColor="#FFFFFF"
-                android:textSize="17sp" />
+                android:textSize="18sp"
+                android:contentDescription="Mulai merekam" />
+
             <Button
                 android:id="@+id/floatingStopButton"
-                android:layout_width="42dp"
-                android:layout_height="42dp"
-                android:layout_marginTop="5dp"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginTop="7dp"
+                android:background="@drawable/floating_button_stop"
                 android:minWidth="0dp"
                 android:minHeight="0dp"
                 android:padding="0dp"
-                android:backgroundTint="#455C70"
                 android:text="■"
-                android:textColor="#FFFFFF"
-                android:textSize="17sp" />
+                android:textColor="#E9F0F4"
+                android:textSize="17sp"
+                android:contentDescription="Hentikan rekaman" />
+
             <Button
                 android:id="@+id/floatingSwitchButton"
-                android:layout_width="42dp"
-                android:layout_height="42dp"
-                android:layout_marginTop="5dp"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginTop="7dp"
+                android:background="@drawable/floating_button_switch"
                 android:minWidth="0dp"
                 android:minHeight="0dp"
                 android:padding="0dp"
-                android:backgroundTint="#24506A"
                 android:text="⇄"
                 android:textColor="#FFFFFF"
-                android:textSize="17sp" />
+                android:textSize="21sp"
+                android:contentDescription="Ganti kamera" />
         </LinearLayout>
-
     </LinearLayout>
 </FrameLayout>

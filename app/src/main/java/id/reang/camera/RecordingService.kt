@@ -18,6 +18,7 @@ import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.TextView
@@ -550,18 +551,23 @@ class RecordingService : LifecycleService() {
             overlaySwitchButton = view.findViewById(R.id.floatingSwitchButton)
 
             overlayBubble?.setOnClickListener {
-                overlayControls?.visibility = View.VISIBLE
-                overlayBubble?.visibility = View.GONE
+                expandFloatingControls()
             }
+            overlayBubble?.let { attachOverlayDrag(it, performClickOnTap = true) }
+
             view.findViewById<Button>(R.id.floatingCollapseButton)?.setOnClickListener {
-                overlayControls?.visibility = View.GONE
-                overlayBubble?.visibility = View.VISIBLE
+                collapseFloatingControls()
             }
             view.findViewById<Button>(R.id.floatingCloseButton)?.setOnClickListener {
                 val closeIntent = Intent(this, RecordingService::class.java)
                     .setAction(ACTION_DISABLE_FLOATING)
                 startService(closeIntent)
             }
+
+            view.findViewById<View>(R.id.floatingDragHandle)?.let {
+                attachOverlayDrag(it, performClickOnTap = false)
+            }
+
             overlayRecButton?.setOnClickListener {
                 if (activeRecording == null && !startInProgress) {
                     stopRequested = false
@@ -579,28 +585,6 @@ class RecordingService : LifecycleService() {
             overlaySwitchButton?.setOnClickListener {
                 switchCameraFromOverlay()
             }
-            view.findViewById<View>(R.id.floatingHeader).setOnTouchListener { _, event ->
-                val params = overlayLayoutParams ?: return@setOnTouchListener false
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        initialTouchX = event.rawX
-                        initialTouchY = event.rawY
-                        initialX = params.x
-                        initialY = params.y
-                        true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        params.x = initialX + (event.rawX - initialTouchX).toInt()
-                        params.y = initialY + (event.rawY - initialTouchY).toInt()
-                        try {
-                            windowManager?.updateViewLayout(view, params)
-                        } catch (_: Exception) {
-                        }
-                        true
-                    }
-                    else -> false
-                }
-            }
 
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -616,11 +600,91 @@ class RecordingService : LifecycleService() {
             }
             overlayLayoutParams = params
             windowManager?.addView(view, params)
+            view.post { clampOverlayToScreen() }
             updateOverlayUi(false, "MEMUAT PREVIEW")
         } catch (e: Exception) {
             removeFloatingOverlay()
             publishState(false, "Panel mengambang gagal dibuka: " + (e.localizedMessage ?: "error"))
         }
+    }
+
+    private fun expandFloatingControls() {
+        overlayBubble?.visibility = View.GONE
+        overlayControls?.apply {
+            alpha = 0f
+            scaleX = 0.94f
+            scaleY = 0.94f
+            visibility = View.VISIBLE
+            animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(150).start()
+        }
+        overlayView?.post { clampOverlayToScreen() }
+    }
+
+    private fun collapseFloatingControls() {
+        overlayControls?.visibility = View.GONE
+        overlayBubble?.visibility = View.VISIBLE
+        overlayView?.post { clampOverlayToScreen() }
+    }
+
+    private fun attachOverlayDrag(handle: View, performClickOnTap: Boolean) {
+        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+        var moved = false
+        handle.setOnTouchListener { touchedView, event ->
+            val params = overlayLayoutParams
+            val root = overlayView
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    initialX = params?.x ?: 0
+                    initialY = params?.y ?: 0
+                    moved = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (event.rawX - initialTouchX).toInt()
+                    val dy = (event.rawY - initialTouchY).toInt()
+                    if (!moved && (kotlin.math.abs(dx) > touchSlop || kotlin.math.abs(dy) > touchSlop)) {
+                        moved = true
+                    }
+                    if (moved && params != null && root != null) {
+                        updateOverlayPosition(root, params, initialX + dx, initialY + dy)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (performClickOnTap && !moved) touchedView.performClick()
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> true
+                else -> false
+            }
+        }
+    }
+
+    private fun updateOverlayPosition(
+        root: View,
+        params: WindowManager.LayoutParams,
+        requestedX: Int,
+        requestedY: Int
+    ) {
+        val metrics = resources.displayMetrics
+        val minX = dp(6)
+        val minY = dp(28)
+        val maxX = (metrics.widthPixels - root.width - dp(6)).coerceAtLeast(minX)
+        val maxY = (metrics.heightPixels - root.height - dp(72)).coerceAtLeast(minY)
+        params.x = requestedX.coerceIn(minX, maxX)
+        params.y = requestedY.coerceIn(minY, maxY)
+        try {
+            windowManager?.updateViewLayout(root, params)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun clampOverlayToScreen() {
+        val root = overlayView ?: return
+        val params = overlayLayoutParams ?: return
+        updateOverlayPosition(root, params, params.x, params.y)
     }
 
     private var initialX = 0
@@ -670,7 +734,7 @@ class RecordingService : LifecycleService() {
         overlayStatus?.text = status
         overlayBubble?.text = if (recording || startInProgress) "●" else ""
         overlayCameraLabel?.text = cameraName()
-        overlayQualityLabel?.text = "Kualitas ${qualityName()}"
+        overlayQualityLabel?.text = qualityName()
         overlayRecButton?.isEnabled = !recording && !startInProgress
         overlayStopButton?.isEnabled = recording || activeDualRecordings.isNotEmpty() || startInProgress
         overlaySwitchButton?.isEnabled = !recording && activeDualRecordings.isEmpty() && !startInProgress
