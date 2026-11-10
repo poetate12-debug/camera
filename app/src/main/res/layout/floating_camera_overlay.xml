@@ -87,36 +87,50 @@
                 android:textSize="10sp" />
         </LinearLayout>
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="7dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="6dp"
+            android:gravity="center_horizontal"
             android:orientation="vertical">
             <Button
                 android:id="@+id/floatingRecButton"
-                android:layout_width="match_parent"
-                android:layout_height="42dp"
+                android:layout_width="116dp"
+                android:layout_height="34dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
                 android:backgroundTint="#D9364A"
-                android:text="● MULAI REKAM"
+                android:text="● REC"
                 android:textColor="#FFFFFF"
-                android:textSize="11sp" />
+                android:textSize="9sp" />
             <Button
                 android:id="@+id/floatingStopButton"
-                android:layout_width="match_parent"
-                android:layout_height="42dp"
-                android:layout_marginTop="6dp"
+                android:layout_width="116dp"
+                android:layout_height="34dp"
+                android:layout_marginTop="4dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
                 android:backgroundTint="#455C70"
-                android:text="■ STOP REKAMAN"
+                android:text="■ STOP"
                 android:textColor="#FFFFFF"
-                android:textSize="11sp" />
+                android:textSize="9sp" />
             <Button
                 android:id="@+id/floatingSwitchButton"
-                android:layout_width="match_parent"
-                android:layout_height="42dp"
-                android:layout_marginTop="6dp"
+                android:layout_width="116dp"
+                android:layout_height="34dp"
+                android:layout_marginTop="4dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
                 android:backgroundTint="#24506A"
-                android:text="⇄ GANTI KAMERA"
+                android:text="⇄ GANTI"
                 android:textColor="#FFFFFF"
-                android:textSize="11sp" />
+                android:textSize="9sp" />
         </LinearLayout>
         <TextView
             android:layout_width="match_parent"
