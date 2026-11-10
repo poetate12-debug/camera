@@ -34,8 +34,19 @@
                 android:layout_height="30dp"
                 android:minWidth="0dp"
                 android:minHeight="0dp"
+                android:text="−"
+                android:textSize="16sp" />
+            <Button
+                android:id="@+id/floatingCloseButton"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:layout_marginStart="5dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:backgroundTint="#B52D3D"
                 android:text="×"
-                android:textSize="14sp" />
+                android:textColor="#FFFFFF"
+                android:textSize="15sp" />
         </LinearLayout>
         <androidx.camera.view.PreviewView
             android:id="@+id/floatingPreviewView"

@@ -557,6 +557,11 @@ class RecordingService : LifecycleService() {
                 overlayControls?.visibility = View.GONE
                 overlayBubble?.visibility = View.VISIBLE
             }
+            view.findViewById<Button>(R.id.floatingCloseButton)?.setOnClickListener {
+                val closeIntent = Intent(this, RecordingService::class.java)
+                    .setAction(ACTION_DISABLE_FLOATING)
+                startService(closeIntent)
+            }
             overlayRecButton?.setOnClickListener {
                 if (activeRecording == null && !startInProgress) {
                     stopRequested = false
